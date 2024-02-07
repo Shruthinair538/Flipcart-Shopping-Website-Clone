@@ -19,6 +19,7 @@ public class ScheduledJobs {
 	@Scheduled(fixedDelay = 1000l*60*60*24) //one day
 	public void test() {
 //		deleteIfNotVerified();
+		
 	}
 
 	private void deleteIfNotVerified() {
