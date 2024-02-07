@@ -109,6 +109,7 @@ public class AuthServiceImpl implements AuthService{
 
 			// If email doesn't exist or not verified, save user data in the database
 			User user = saveUser(request);
+			
 
 			return new ResponseEntity<ResponseStructure<UserResponse>>(
 					structure.setStatusCode(HttpStatus.ACCEPTED.value())
