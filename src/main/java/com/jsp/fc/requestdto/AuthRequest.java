@@ -8,12 +8,12 @@ import lombok.Setter;
 
 @Getter
 @Setter
-@AllArgsConstructor
 @NoArgsConstructor
+@AllArgsConstructor
 @Builder
-public class OtpModel {
+public class AuthRequest {
 	
 	private String userEmail;
-	private String otp;
+	private String userPassword;
 
 }

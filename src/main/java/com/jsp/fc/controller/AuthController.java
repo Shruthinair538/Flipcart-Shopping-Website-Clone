@@ -7,11 +7,15 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.jsp.fc.requestdto.AuthRequest;
 import com.jsp.fc.requestdto.OtpModel;
 import com.jsp.fc.requestdto.UserRequest;
+import com.jsp.fc.responsedto.AuthResponse;
 import com.jsp.fc.responsedto.UserResponse;
 import com.jsp.fc.service.AuthService;
 import com.jsp.fc.utility.ResponseStructure;
+
+import jakarta.servlet.http.HttpServletResponse;
 
 @RestController
 public class AuthController {
@@ -28,4 +32,11 @@ public class AuthController {
 	public ResponseEntity<ResponseStructure<UserResponse>> verifyOtp(@RequestBody OtpModel otpModel){
 		return service.veifyOtp(otpModel);
 	}
+	
+	@PostMapping("/login")
+	public ResponseEntity<ResponseStructure<AuthResponse>> login(@RequestBody AuthRequest authRequest,HttpServletResponse response){
+		return service.login(authRequest,response);
+	}
+	
+
 }
