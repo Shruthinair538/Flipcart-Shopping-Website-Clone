@@ -38,8 +38,5 @@ public class AuthController {
 		return service.login(authRequest,response);
 	}
 	
-//	@PostMapping("/register")
-//	public ResponseEntity<ResponseStructure<UserResponse>> registerUser(@RequestBody UserRequest request){
-//		return service.registerUser(request);
-//	}
+
 }
