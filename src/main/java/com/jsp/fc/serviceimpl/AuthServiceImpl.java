@@ -28,6 +28,7 @@ import com.jsp.fc.exception.InvalidOtpException;
 import com.jsp.fc.exception.NoUserExistInCacheException;
 import com.jsp.fc.exception.OtpExpiredException;
 import com.jsp.fc.exception.UserNameNotFoundException;
+import com.jsp.fc.exception.UserNotLoggedInException;
 import com.jsp.fc.repository.AccessTokenRepo;
 import com.jsp.fc.repository.CustomerRepository;
 import com.jsp.fc.repository.RefreshTokenRepo;
@@ -64,34 +65,34 @@ public class AuthServiceImpl implements AuthService{
 	private SellerRepository sellerRepo;
 
 	private ResponseStructure<UserResponse> structure;
-	
+
 	private ResponseStructure<AuthResponse> authStructure;
-	
+
 	private PasswordEncoder encoder;
-	
+
 	private CacheStore<String> otpCache;
 
 	private CacheStore<User> userCachestore;
-	
+
 	private JavaMailSender javaMailSender;
-	
+
 	private AuthenticationManager authenticationManager;
-	
+
 	private CookieManager cookieManager;
-	
+
 	@Value("${myapp.access.expiry}")
 	private int accessExpiryInSeconds;
-	
+
 	@Value("${myapp.refresh.expiry}")
 	private int refreshExpiryInSeconds;
-	
+
 	private JwtService jwtService;
-	
+
 	private AccessTokenRepo accessTokenRepo;
-	
+
 	private RefreshTokenRepo refreshTokenRepo;
 
-	
+
 
 	public AuthServiceImpl(UserRepository userRepo, CustomerRepository customRepo, SellerRepository sellerRepo,
 			ResponseStructure<UserResponse> structure, ResponseStructure<AuthResponse> authStructure,
@@ -153,111 +154,134 @@ public class AuthServiceImpl implements AuthService{
 	public ResponseEntity<ResponseStructure<UserResponse>> registerUser(UserRequest request) {
 
 		if (userRepo.existsByUserEmail(request.getUserEmail())) {   //if email exists
-				// If email is already verified, throw exception
-				throw new EmailAlreadyVerifiedException("Email already exist!!");
-			} 
-		
+			// If email is already verified, throw exception
+			throw new EmailAlreadyVerifiedException("Email already exist!!");
+		} 
+
 		String otp=genetateOtp();
 		User user = mapToUser(request);
 		userCachestore.add(request.getUserEmail(), user);
 		otpCache.add(request.getUserEmail(), otp);
-		
+
 		try {
 			sentOtpToMail(user, otp);
 		} catch (MessagingException e) {
 			log.error("The emailId doesn't exist!! ");
 		}
-		
+
 		return new ResponseEntity<ResponseStructure<UserResponse>>(
 				structure.setStatusCode(HttpStatus.ACCEPTED.value())
 				.setMessage("Otp has been sent,Please verify the otp sent through email. ")
 				.setData(mapToUserResponse(user)), HttpStatus.ACCEPTED);
-		
+
 	}
 
 	@Override
 	public ResponseEntity<ResponseStructure<UserResponse>> veifyOtp(OtpModel otpModel) {
 		User user = userCachestore.get(otpModel.getUserEmail());  //Fetched the whole entry using key from cache
-	    String otp = otpCache.get(otpModel.getUserEmail());
-	    
-	    if(user == null)
-	    	throw new NoUserExistInCacheException("Registration has expired!!");
-	    
-	    if(otp == null) {
-	    	throw new OtpExpiredException("Otp has expired!!");
-	    }
-	    
-	    if(!otp.equals(otpModel.getOtp()))
-	    	throw new InvalidOtpException("Invalid otp!!");
-	    
-	    user.setEmailVerified(true);
-	    userRepo.save(user);
-	    
-	    try {
+		String otp = otpCache.get(otpModel.getUserEmail());
+
+		if(user == null)
+			throw new NoUserExistInCacheException("Registration has expired!!");
+
+		if(otp == null) {
+			throw new OtpExpiredException("Otp has expired!!");
+		}
+
+		if(!otp.equals(otpModel.getOtp()))
+			throw new InvalidOtpException("Invalid otp!!");
+
+		user.setEmailVerified(true);
+		userRepo.save(user);
+
+		try {
 			sendConfirmationMail(user);
 		} catch (MessagingException e) {
 			log.error("Registration unsuccessful!!");
 		}
-	    
-	    
-	    
-	    structure.setStatusCode(HttpStatus.CREATED.value());
-	    structure.setMessage("User object registered successfully!!");
-	    structure.setData(mapToUserResponse(user));
-	    return new ResponseEntity<ResponseStructure<UserResponse>>(structure,HttpStatus.CREATED);
-	    
+
+
+
+		structure.setStatusCode(HttpStatus.CREATED.value());
+		structure.setMessage("User object registered successfully!!");
+		structure.setData(mapToUserResponse(user));
+		return new ResponseEntity<ResponseStructure<UserResponse>>(structure,HttpStatus.CREATED);
+
 	}
-	
+
 	@Override
 	public ResponseEntity<ResponseStructure<AuthResponse>> login(AuthRequest authRequest,HttpServletResponse response) {
 		String userName = authRequest.getUserEmail().split("@")[0];
 		String userPassword = authRequest.getUserPassword();
-		
+
 		UsernamePasswordAuthenticationToken token = new UsernamePasswordAuthenticationToken(userName, userPassword);
-	    Authentication authentication = authenticationManager.authenticate(token);
-	    if(!authentication.isAuthenticated()) {
-	    	throw new UserNameNotFoundException("Failed to authenticate the user!!");
-	    }
-	    
-	    else 
-	    	return userRepo.findByUserName(userName).map(user->{
-	    		grantAccess(response, user);
-	    		
-	    		return ResponseEntity.ok(authStructure.setStatusCode(HttpStatus.OK.value())
-	    				.setData(AuthResponse.builder()
-	    						.userId(user.getUserId())
-	    						.userName(userName)
-	    						.userRole(user.getUserRole().name())
-	    						.isAuthenticated(true)
-	    						.accessExpiration(LocalDateTime.now().plusSeconds(accessExpiryInSeconds))
-	    						.refreshExpiration(LocalDateTime.now().plusSeconds(refreshExpiryInSeconds))
-	    						.build())
-	    				.setMessage("Login successfull!!"));
-	    		
-	    	}).get();
-	    	
-	    	   	     
-	
+		Authentication authentication = authenticationManager.authenticate(token);
+		if(!authentication.isAuthenticated()) {
+			throw new UserNameNotFoundException("Failed to authenticate the user!!");
+		}
+
+		else 
+			return userRepo.findByUserName(userName).map(user->{
+				grantAccess(response, user);
+
+				return ResponseEntity.ok(authStructure.setStatusCode(HttpStatus.OK.value())
+						.setData(AuthResponse.builder()
+								.userId(user.getUserId())
+								.userName(userName)
+								.userRole(user.getUserRole().name())
+								.isAuthenticated(true)
+								.accessExpiration(LocalDateTime.now().plusSeconds(accessExpiryInSeconds))
+								.refreshExpiration(LocalDateTime.now().plusSeconds(refreshExpiryInSeconds))
+								.build())
+						.setMessage("Login successfull!!"));
+
+			}).get();
+
+
+
 	}
-	
-	
-	
+
+
+	@Override
+	public ResponseEntity<String> userLogout(String refreshToken, String accessToken, HttpServletResponse response) {
+		if(accessToken==null && refreshToken ==null) throw new UserNotLoggedInException("The user needs to login !");
+
+		accessTokenRepo.findByToken(accessToken).ifPresent(accesstoken->{
+			accesstoken.setBlocked(true);
+			accessTokenRepo.save(accesstoken);
+		});
+		
+
+		refreshTokenRepo.findByToken(refreshToken).ifPresent(refreshtoken->{
+			refreshtoken.setBlocked(true);
+			refreshTokenRepo.save(refreshtoken);
+		});
+
+		response.addCookie(cookieManager.invalidateCookie(new Cookie("acessToken", "")));
+		response.addCookie(cookieManager.invalidateCookie(new Cookie("refreshToken", "")));
+
+		return ResponseEntity.ok("Logged out successfully");
+	}
+
+
+
+
 	private void grantAccess(HttpServletResponse response,User user) {
 		//generating access and refresh token
 		String accessToken = jwtService.generateAccessToken(user.getUserName());
 		String refreshToken = jwtService.generateRefreshToken(user.getUserName());
-		
+
 		//adding access and refresh token to response
 		response.addCookie(cookieManager.configure(new Cookie("at",accessToken), accessExpiryInSeconds));
 		response.addCookie(cookieManager.configure(new Cookie("rt",refreshToken), refreshExpiryInSeconds));
-		
+
 		//saving access and refresh cookie to db
 		accessTokenRepo.save(AccessToken.builder()
 				.token(accessToken)
 				.isBlocked(false)
 				.expiration(LocalDateTime.now().plusSeconds(accessExpiryInSeconds))
 				.build());
-		
+
 		refreshTokenRepo.save(RefreshToken.builder()
 				.token(refreshToken)
 				.isBlocked(false)
@@ -265,9 +289,9 @@ public class AuthServiceImpl implements AuthService{
 				.build());
 
 	}
-	
-	
-	
+
+
+
 	private <T extends User>T saveUser(UserRequest request) {
 		User user=null;
 
@@ -284,11 +308,11 @@ public class AuthServiceImpl implements AuthService{
 		return (T)user;
 
 	}
-	
+
 	private String genetateOtp() {
 		return String.valueOf(new Random().nextInt(100000, 999999));  //generates 6 digits otp
 	}
-	
+
 	@Async
 	private void sendMail(MessageStructure message) throws MessagingException {  //type as void because it should work asynchronously
 		MimeMessage mimeMessage=javaMailSender.createMimeMessage();
@@ -299,7 +323,7 @@ public class AuthServiceImpl implements AuthService{
 		helper.setText(message.getText(),true);
 		javaMailSender.send(mimeMessage);
 	}
-	
+
 	private void sentOtpToMail(User user,String otp) throws MessagingException {
 		sendMail(MessageStructure.builder()
 				.to(user.getUserEmail())
@@ -309,10 +333,10 @@ public class AuthServiceImpl implements AuthService{
 				+ "Complete your registration using the otp sent to your email. "
 				+otp+" is ur otp which is valid only for the next 10 minutes.")
 				.build());
-		
-		
+
+
 	}
-	
+
 	private void sendConfirmationMail(User user) throws MessagingException {
 		sendMail(MessageStructure.builder()
 				.to(user.getUserEmail())
@@ -321,18 +345,19 @@ public class AuthServiceImpl implements AuthService{
 				.text("Welcome, "+user.getUserName()
 				+ "You are registered successfully!! ")
 				.build());
-		
-		
+
+
 	}
 
-	
-	
-		
-	
 
 
 
-	
+
+
+
+
+
+
 
 
 

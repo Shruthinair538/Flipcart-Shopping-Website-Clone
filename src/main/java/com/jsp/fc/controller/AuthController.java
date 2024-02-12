@@ -2,6 +2,7 @@ package com.jsp.fc.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -36,6 +37,12 @@ public class AuthController {
 	@PostMapping("/login")
 	public ResponseEntity<ResponseStructure<AuthResponse>> login(@RequestBody AuthRequest authRequest,HttpServletResponse response){
 		return service.login(authRequest,response);
+	}
+	
+	@PostMapping("/userlogout")
+	public ResponseEntity<String> userLogout(@CookieValue(name="rt",required = false) String refreshToken, 
+			@CookieValue(name="at",required = false) String accessToken,HttpServletResponse response){
+		return service.userLogout(refreshToken,accessToken,response);
 	}
 	
 
