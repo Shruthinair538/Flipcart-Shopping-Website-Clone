@@ -2,6 +2,7 @@ package com.jsp.fc.serviceimpl;
 
 import java.time.LocalDateTime;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
 import java.util.Random;
 
@@ -324,18 +325,18 @@ public class AuthServiceImpl implements AuthService{
 		
 		
 	}
+	
+	public void deleteExpiredTokens() {
+		List<AccessToken> accessToken= accessTokenRepo.findAllByExpirationBeforeAndIsBlocked(LocalDateTime.now(), false);
+		accessTokenRepo.deleteAll(accessToken);
+		List<RefreshToken> refreshToken =refreshTokenRepo.findAllByExpirationBeforeAndIsBlocked(LocalDateTime.now(), false);
+		refreshTokenRepo.deleteAll(refreshToken);
+	}
+
 
 	
 	
-		
 	
-
-
-
-	
-
-
-
 
 
 }

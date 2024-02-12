@@ -8,17 +8,22 @@ import org.springframework.stereotype.Component;
 
 import com.jsp.fc.entity.User;
 import com.jsp.fc.repository.UserRepository;
+import com.jsp.fc.serviceimpl.AuthServiceImpl;
 
 @Component
 public class ScheduledJobs {
 	
 	@Autowired
 	private UserRepository userRepo;
+	
+	@Autowired
+	private AuthServiceImpl authService;
 
 	
 	@Scheduled(fixedDelay = 1000l*60*60*24) //one day
 	public void test() {
-//		deleteIfNotVerified();
+		deleteIfNotVerified();
+		authService.deleteExpiredTokens();
 		
 	}
 
