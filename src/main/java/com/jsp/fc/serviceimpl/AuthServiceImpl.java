@@ -1,42 +1,57 @@
 package com.jsp.fc.serviceimpl;
 
+import java.time.LocalDateTime;
 import java.util.Date;
-
+import java.util.Optional;
 import java.util.Random;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import com.jsp.fc.cache.CacheStore;
+import com.jsp.fc.entity.AccessToken;
 import com.jsp.fc.entity.Customer;
+import com.jsp.fc.entity.RefreshToken;
 import com.jsp.fc.entity.Seller;
 import com.jsp.fc.entity.User;
 import com.jsp.fc.exception.EmailAlreadyVerifiedException;
 import com.jsp.fc.exception.InvalidOtpException;
 import com.jsp.fc.exception.NoUserExistInCacheException;
 import com.jsp.fc.exception.OtpExpiredException;
+import com.jsp.fc.exception.UserNameNotFoundException;
+import com.jsp.fc.repository.AccessTokenRepo;
 import com.jsp.fc.repository.CustomerRepository;
+import com.jsp.fc.repository.RefreshTokenRepo;
 import com.jsp.fc.repository.SellerRepository;
 import com.jsp.fc.repository.UserRepository;
+import com.jsp.fc.requestdto.AuthRequest;
 import com.jsp.fc.requestdto.OtpModel;
 import com.jsp.fc.requestdto.UserRequest;
+import com.jsp.fc.responsedto.AuthResponse;
 import com.jsp.fc.responsedto.UserResponse;
+import com.jsp.fc.security.JwtService;
 import com.jsp.fc.service.AuthService;
+import com.jsp.fc.utility.CookieManager;
 import com.jsp.fc.utility.MessageStructure;
 import com.jsp.fc.utility.ResponseStructure;
 
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
-@AllArgsConstructor
 @Slf4j
 public class AuthServiceImpl implements AuthService{
 
@@ -50,6 +65,8 @@ public class AuthServiceImpl implements AuthService{
 
 	private ResponseStructure<UserResponse> structure;
 	
+	private ResponseStructure<AuthResponse> authStructure;
+	
 	private PasswordEncoder encoder;
 	
 	private CacheStore<String> otpCache;
@@ -57,6 +74,46 @@ public class AuthServiceImpl implements AuthService{
 	private CacheStore<User> userCachestore;
 	
 	private JavaMailSender javaMailSender;
+	
+	private AuthenticationManager authenticationManager;
+	
+	private CookieManager cookieManager;
+	
+	@Value("${myapp.access.expiry}")
+	private int accessExpiryInSeconds;
+	
+	@Value("${myapp.refresh.expiry}")
+	private int refreshExpiryInSeconds;
+	
+	private JwtService jwtService;
+	
+	private AccessTokenRepo accessTokenRepo;
+	
+	private RefreshTokenRepo refreshTokenRepo;
+
+	
+
+	public AuthServiceImpl(UserRepository userRepo, CustomerRepository customRepo, SellerRepository sellerRepo,
+			ResponseStructure<UserResponse> structure, ResponseStructure<AuthResponse> authStructure,
+			PasswordEncoder encoder, CacheStore<String> otpCache, CacheStore<User> userCachestore,
+			JavaMailSender javaMailSender, AuthenticationManager authenticationManager, CookieManager cookieManager,
+			JwtService jwtService, AccessTokenRepo accessTokenRepo, RefreshTokenRepo refreshTokenRepo) {
+		super();
+		this.userRepo = userRepo;
+		this.customRepo = customRepo;
+		this.sellerRepo = sellerRepo;
+		this.structure = structure;
+		this.authStructure = authStructure;
+		this.encoder = encoder;
+		this.otpCache = otpCache;
+		this.userCachestore = userCachestore;
+		this.javaMailSender = javaMailSender;
+		this.authenticationManager = authenticationManager;
+		this.cookieManager = cookieManager;
+		this.jwtService = jwtService;
+		this.accessTokenRepo = accessTokenRepo;
+		this.refreshTokenRepo = refreshTokenRepo;
+	}
 
 	public <T extends User>T mapToUser(UserRequest request) {
 		User user=null;
@@ -97,7 +154,7 @@ public class AuthServiceImpl implements AuthService{
 
 		if (userRepo.existsByUserEmail(request.getUserEmail())) {   //if email exists
 				// If email is already verified, throw exception
-				throw new RuntimeException("Email doesnt exist!!");
+				throw new EmailAlreadyVerifiedException("Email already exist!!");
 			} 
 		
 		String otp=genetateOtp();
@@ -120,8 +177,8 @@ public class AuthServiceImpl implements AuthService{
 
 	@Override
 	public ResponseEntity<ResponseStructure<UserResponse>> veifyOtp(OtpModel otpModel) {
-		User user = userCachestore.get(otpModel.getEmail());  //Fetched the whole entry using key from cache
-	    String otp = otpCache.get(otpModel.getEmail());
+		User user = userCachestore.get(otpModel.getUserEmail());  //Fetched the whole entry using key from cache
+	    String otp = otpCache.get(otpModel.getUserEmail());
 	    
 	    if(user == null)
 	    	throw new NoUserExistInCacheException("Registration has expired!!");
@@ -149,6 +206,64 @@ public class AuthServiceImpl implements AuthService{
 	    structure.setData(mapToUserResponse(user));
 	    return new ResponseEntity<ResponseStructure<UserResponse>>(structure,HttpStatus.CREATED);
 	    
+	}
+	
+	@Override
+	public ResponseEntity<ResponseStructure<AuthResponse>> login(AuthRequest authRequest,HttpServletResponse response) {
+		String userName = authRequest.getUserEmail().split("@")[0];
+		String userPassword = authRequest.getUserPassword();
+		
+		UsernamePasswordAuthenticationToken token = new UsernamePasswordAuthenticationToken(userName, userPassword);
+	    Authentication authentication = authenticationManager.authenticate(token);
+	    if(!authentication.isAuthenticated()) {
+	    	throw new UserNameNotFoundException("Failed to authenticate the user!!");
+	    }
+	    
+	    else 
+	    	return userRepo.findByUserName(userName).map(user->{
+	    		grantAccess(response, user);
+	    		
+	    		return ResponseEntity.ok(authStructure.setStatusCode(HttpStatus.OK.value())
+	    				.setData(AuthResponse.builder()
+	    						.userId(user.getUserId())
+	    						.userName(userName)
+	    						.userRole(user.getUserRole().name())
+	    						.isAuthenticated(true)
+	    						.accessExpiration(LocalDateTime.now().plusSeconds(accessExpiryInSeconds))
+	    						.refreshExpiration(LocalDateTime.now().plusSeconds(refreshExpiryInSeconds))
+	    						.build())
+	    				.setMessage("Login successfull!!"));
+	    		
+	    	}).get();
+	    	
+	    	   	     
+	
+	}
+	
+	
+	
+	private void grantAccess(HttpServletResponse response,User user) {
+		//generating access and refresh token
+		String accessToken = jwtService.generateAccessToken(user.getUserName());
+		String refreshToken = jwtService.generateRefreshToken(user.getUserName());
+		
+		//adding access and refresh token to response
+		response.addCookie(cookieManager.configure(new Cookie("at",accessToken), accessExpiryInSeconds));
+		response.addCookie(cookieManager.configure(new Cookie("rt",refreshToken), refreshExpiryInSeconds));
+		
+		//saving access and refresh cookie to db
+		accessTokenRepo.save(AccessToken.builder()
+				.token(accessToken)
+				.isBlocked(false)
+				.expiration(LocalDateTime.now().plusSeconds(accessExpiryInSeconds))
+				.build());
+		
+		refreshTokenRepo.save(RefreshToken.builder()
+				.token(refreshToken)
+				.isBlocked(false)
+				.expiration(LocalDateTime.now().plusSeconds(refreshExpiryInSeconds))
+				.build());
+
 	}
 	
 	
@@ -209,6 +324,8 @@ public class AuthServiceImpl implements AuthService{
 		
 		
 	}
+
+	
 	
 		
 	
