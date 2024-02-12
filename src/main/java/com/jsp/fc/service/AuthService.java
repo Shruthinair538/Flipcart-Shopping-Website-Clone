@@ -19,4 +19,6 @@ public interface AuthService {
 
 	ResponseEntity<ResponseStructure<AuthResponse>> login(AuthRequest authRequest, HttpServletResponse response);
 
+	ResponseEntity<String> userLogout(String refreshToken, String accessToken, HttpServletResponse response);
+
 }
