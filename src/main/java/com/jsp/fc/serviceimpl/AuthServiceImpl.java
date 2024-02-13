@@ -1,6 +1,7 @@
 package com.jsp.fc.serviceimpl;
 
 import java.time.LocalDateTime;
+
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -15,6 +16,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +31,7 @@ import com.jsp.fc.exception.InvalidOtpException;
 import com.jsp.fc.exception.NoUserExistInCacheException;
 import com.jsp.fc.exception.OtpExpiredException;
 import com.jsp.fc.exception.UserNameNotFoundException;
+import com.jsp.fc.exception.UserNotLoggedInException;
 import com.jsp.fc.repository.AccessTokenRepo;
 import com.jsp.fc.repository.CustomerRepository;
 import com.jsp.fc.repository.RefreshTokenRepo;
@@ -49,7 +52,7 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.AllArgsConstructor;
+
 import lombok.extern.slf4j.Slf4j;
 
 @Service
@@ -331,6 +334,66 @@ public class AuthServiceImpl implements AuthService{
 		accessTokenRepo.deleteAll(accessToken);
 		List<RefreshToken> refreshToken =refreshTokenRepo.findAllByExpirationBeforeAndIsBlocked(LocalDateTime.now(), false);
 		refreshTokenRepo.deleteAll(refreshToken);
+	}
+
+	@Override
+	public ResponseEntity<String> revokeAllOtherDevices(String accessToken, String refreshToken,
+			HttpServletResponse response) {
+   if(accessToken==null && refreshToken==null)
+	   throw new UserNotLoggedInException("User is Not LoggedIn !!");
+		
+		String username = SecurityContextHolder.getContext().getAuthentication().getName();
+		if(username == null) throw new UserNameNotFoundException("username not found");
+
+		return userRepo.findByUserName(username)
+		.map(user -> {
+			blockAccessToken(accessTokenRepo.findByUserAndIsBlockedAndTokenNot(user, false, accessToken));
+			blockRefreshToken(refreshTokenRepo.findByUserAndIsBlockedAndTokenNot(user, false, refreshToken));
+			
+			return ResponseEntity.ok("Revoked from all other devices excluding the current one successfully");
+		})
+		.orElseThrow(() -> new UserNameNotFoundException("username not found"));
+		
+
+	}
+
+	private void blockRefreshToken(List<RefreshToken> refreshTokens) {
+		refreshTokens.forEach(refreshToken -> {
+			refreshToken.setBlocked(true);
+			refreshTokenRepo.save(refreshToken);
+		});
+		
+	}
+
+	private void blockAccessToken(List<AccessToken> accessTokens) {
+		accessTokens.forEach(accessToken -> {
+			accessToken.setBlocked(true);
+			accessTokenRepo.save(accessToken);
+		});
+		
+	}
+
+	@Override
+	public ResponseEntity<String> revokeAllDevices(String accessToken, String refreshToken,
+			HttpServletResponse response) {
+     if(accessToken==null && refreshToken==null) 
+	 throw new UserNotLoggedInException("User not logged In");
+		
+		String username = SecurityContextHolder.getContext().getAuthentication().getName();
+		if(username == null) throw new UserNameNotFoundException("username not found");
+		
+		return userRepo.findByUserName(username)
+		.map(user -> {
+
+			blockAccessToken(accessTokenRepo.findByUserAndIsBlocked(user, false));
+			blockRefreshToken(refreshTokenRepo.findByUserAndIsBlocked(user, false));
+
+			response.addCookie(cookieManager.invalidateCookie(new Cookie("at", "")));
+			response.addCookie(cookieManager.invalidateCookie(new Cookie("rt", "")));
+			
+			return ResponseEntity.ok("Revoked from all devices successfully");
+		})
+		.orElseThrow(() -> new UserNameNotFoundException("username not found"));
 	}
 
 

@@ -19,4 +19,8 @@ public interface AuthService {
 
 	ResponseEntity<ResponseStructure<AuthResponse>> login(AuthRequest authRequest, HttpServletResponse response);
 
+	ResponseEntity<String> revokeAllOtherDevices(String accessToken, String refreshToken, HttpServletResponse response);
+
+	ResponseEntity<String> revokeAllDevices(String accessToken, String refreshToken, HttpServletResponse response);
+
 }
